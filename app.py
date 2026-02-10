@@ -6,6 +6,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
+import io
+import csv
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,9 +32,11 @@ Respond in clear paragraphs. Avoid jargon where possible.
 """
 
 # Initialize LLM
-llm = ChatOpenAI(
-    temperature=0.2,
-    model="gpt-4o-mini"
+from langchain_ollama import ChatOllama
+
+llm = ChatOllama(
+    model="llama3",
+    temperature=0.2
 )
 
 
@@ -63,33 +67,46 @@ def analyze_logs(log_text: str):
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve the main HTML page"""
-    with open("index.html", "r") as f:
+    with open("index.html", "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
 
 
 @app.post("/analyze")
 async def analyze_log_file(file: UploadFile = File(...)):
-    """Analyze uploaded log file"""
-    if not file.filename.endswith(".txt"):
+    """Analyze uploaded log file (.txt or .csv supported)"""
+
+    if not (file.filename.endswith(".txt") or file.filename.endswith(".csv")):
         return JSONResponse(
             status_code=400,
-            content={"error": "Only .txt log files are supported"}
+            content={"error": "Only .txt and .csv files are supported"}
         )
 
     try:
         content = await file.read()
-        log_text = content.decode("utf-8", errors="ignore")
+
+        # Handle TXT files
+        if file.filename.endswith(".txt"):
+            log_text = content.decode("utf-8", errors="ignore")
+
+        # Handle CSV files
+        elif file.filename.endswith(".csv"):
+            decoded = content.decode("utf-8", errors="ignore")
+            csv_reader = csv.reader(io.StringIO(decoded))
+
+            # Convert CSV rows into readable log-style text
+            rows = [" | ".join(row) for row in csv_reader]
+            log_text = "\n".join(rows)
 
         if not log_text.strip():
             return JSONResponse(
                 status_code=400,
-                content={"error": "Log file is empty"}
+                content={"error": "File is empty"}
             )
 
         insights = analyze_logs(log_text)
 
         return {"analysis": insights}
-    
+
     except Exception as e:
         return JSONResponse(
             status_code=500,
